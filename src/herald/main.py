@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from importlib.metadata import metadata, version
 
 import structlog
+from aiobotocore.session import get_session
 from fastapi import FastAPI
 from safir.dependencies.http_client import http_client_dependency
 from safir.logging import configure_logging, configure_uvicorn_logging
@@ -19,6 +20,7 @@ from safir.middleware.x_forwarded import XForwardedMiddleware
 from safir.slack.webhook import SlackRouteErrorHandler
 
 from .config import config
+from .dependencies.requestcontext import context_dependency
 from .handlers.external import external_router
 from .handlers.internal import internal_router
 
@@ -28,11 +30,17 @@ __all__ = ["app"]
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Set up and tear down the application."""
-    # Any code here will be run when the application starts up.
+    session = get_session()
+    async with session.create_client(
+        "s3",
+        endpoint_url=config.s3_endpoint_url,
+        region_name=config.s3_region,
+        **config.s3_credentials,
+    ) as s3_client:
+        await context_dependency.initialize(s3_client)
+        yield
 
-    yield
-
-    # Any code here will be run when the application shuts down.
+    await context_dependency.aclose()
     await http_client_dependency.aclose()
 
 
@@ -54,17 +62,11 @@ app = FastAPI(
 )
 """The main FastAPI application for herald."""
 
-# Attach the routers.
 app.include_router(internal_router)
 app.include_router(external_router, prefix=f"{config.path_prefix}")
-
-# Add middleware.
 app.add_middleware(XForwardedMiddleware)
 
-# Configure Slack alerts.
 if config.slack_webhook:
     logger = structlog.get_logger("herald")
-    SlackRouteErrorHandler.initialize(
-        config.slack_webhook, "herald", logger
-    )
+    SlackRouteErrorHandler.initialize(config.slack_webhook, "herald", logger)
     logger.debug("Initialized Slack webhook")

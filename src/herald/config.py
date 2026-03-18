@@ -16,7 +16,7 @@ class Config(BaseSettings):
 
     name: str = Field("herald", title="Name of application")
 
-    path_prefix: str = Field("/api/herald", title="URL prefix for application")
+    path_prefix: str = Field("/api/alerts", title="URL prefix for application")
 
     log_level: LogLevel = Field(
         LogLevel.INFO, title="Log level of the application's logger"

@@ -36,12 +36,15 @@ class RequestContext:
     def rebind_logger(self, **values: str | None) -> None:
         """Add the given values to the logging context.
 
+        Updates both the context logger and the factory's logger.
+
         Parameters
         ----------
         **values
             Additional key/value pairs to bind to the logger.
         """
         self.logger = self.logger.bind(**values)
+        self.factory.set_logger(self.logger)
 
 
 class ContextDependency:

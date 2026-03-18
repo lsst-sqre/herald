@@ -13,7 +13,8 @@ from importlib.metadata import metadata, version
 
 import structlog
 from aiobotocore.session import get_session
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import Response
 from safir.dependencies.http_client import http_client_dependency
 from safir.logging import configure_logging, configure_uvicorn_logging
 from safir.middleware.x_forwarded import XForwardedMiddleware
@@ -21,6 +22,7 @@ from safir.slack.webhook import SlackRouteErrorHandler
 
 from .config import config
 from .dependencies.requestcontext import context_dependency
+from .exceptions import AlertNotFoundError, SchemaNotFoundError
 from .handlers.external import external_router
 from .handlers.internal import internal_router
 
@@ -58,6 +60,7 @@ app = FastAPI(
     openapi_url=f"{config.path_prefix}/openapi.json",
     docs_url=f"{config.path_prefix}/docs",
     redoc_url=f"{config.path_prefix}/redoc",
+    redirect_slashes=False,
     lifespan=lifespan,
 )
 """The main FastAPI application for herald."""
@@ -65,6 +68,21 @@ app = FastAPI(
 app.include_router(internal_router)
 app.include_router(external_router, prefix=f"{config.path_prefix}")
 app.add_middleware(XForwardedMiddleware)
+
+
+@app.exception_handler(AlertNotFoundError)
+async def _alert_not_found(
+    request: Request, exc: AlertNotFoundError
+) -> Response:
+    return Response(content=str(exc), media_type="text/plain", status_code=404)
+
+
+@app.exception_handler(SchemaNotFoundError)
+async def _schema_not_found(
+    request: Request, exc: SchemaNotFoundError
+) -> Response:
+    return Response(content=str(exc), media_type="text/plain", status_code=404)
+
 
 if config.slack_webhook:
     logger = structlog.get_logger("herald")

@@ -1,6 +1,20 @@
 """Custom exceptions for the herald service."""
 
-__all__ = ["AlertNotFoundError", "SchemaNotFoundError"]
+__all__ = [
+    "AlertNotFoundError",
+    "CorruptAlertError",
+    "SchemaNotFoundError",
+]
+
+
+class CorruptAlertError(Exception):
+    """Raised when stored alert bytes are structurally invalid. This
+    indicates data corruption and should propagate as a 500.
+    """
+
+    def __init__(self, alert_id: int, detail: str) -> None:
+        self.alert_id = alert_id
+        super().__init__(f"Alert {alert_id}: {detail}")
 
 
 class AlertNotFoundError(Exception):
@@ -8,7 +22,7 @@ class AlertNotFoundError(Exception):
 
     def __init__(self, alert_id: int) -> None:
         self.alert_id = alert_id
-        super().__init__(f"Alert {alert_id} not found")
+        super().__init__(f"No data found for alert ID '{alert_id}'")
 
 
 class SchemaNotFoundError(Exception):

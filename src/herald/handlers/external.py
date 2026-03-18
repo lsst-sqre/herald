@@ -1,53 +1,206 @@
 """Handlers for the app's external root, ``/herald/``."""
 
-import base64
-import math
-from collections.abc import Generator
-from contextlib import contextmanager
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.encoders import jsonable_encoder
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response
 from safir.dependencies.gafaelfawr import auth_dependency
 from safir.metadata import get_metadata
 from safir.slack.webhook import SlackRouteErrorHandler
 
 from ..config import config
+from ..constants import IAU_ALERT_PREFIX
 from ..dependencies import RequestContext, context_dependency
-from ..exceptions import AlertNotFoundError, SchemaNotFoundError
 from ..models import Index
+from .datalink import build_links_votable
 
 __all__ = ["external_router"]
 
 external_router = APIRouter(route_class=SlackRouteErrorHandler)
 """FastAPI router for all external handlers."""
 
-_AVRO_CONTENT_TYPE = "application/avro"
+_AVRO_OCF_CONTENT_TYPE = "application/x-avro-ocf"
+_FITS_CONTENT_TYPE = "application/fits"
+_VOTABLE_CONTENT_TYPE = "application/x-votable+xml"
+_FITS_FORMATS: frozenset[str] = frozenset({"fits", "application/fits"})
+_JSON_FORMATS: frozenset[str] = frozenset({"json", "application/json"})
+_ACCEPTED_FORMATS: frozenset[str] = _FITS_FORMATS | _JSON_FORMATS
+_ALERT_PARAMS: frozenset[str] = frozenset({"ID", "RESPONSEFORMAT"})
+_ID_ONLY_PARAMS: frozenset[str] = frozenset({"ID"})
 
 
-def _none_if_nonfinite(f: float) -> float | None:
-    """Return None for NaN/Inf floats, which are not valid JSON."""
-    return None if math.isnan(f) or math.isinf(f) else f
+def _check_unknown_params(
+    request: Request, allowed: frozenset[str]
+) -> Response | None:
+    """Return a 400 Response if any unknown query params are present.
+
+    Parameters
+    ----------
+    request
+        The incoming request.
+    allowed
+        The set of allowed query parameter names.
+
+    Returns
+    -------
+    Response | None
+        A 400 Response if unknown params are found, or ``None`` otherwise.
+    """
+    unknown = [k for k in request.query_params if k not in allowed]
+    if unknown:
+        query_string = "?" + str(request.url.query)
+        return Response(
+            content=(
+                f"Invalid parameter '{unknown[0]}'"
+                f" in query string '{query_string}'"
+            ),
+            media_type="text/plain",
+            status_code=400,
+        )
+    return None
 
 
-@contextmanager
-def _handle_alert_errors() -> Generator[None]:
-    """Translate domain exceptions to HTTP responses."""
+def _parse_alert_id(alert_id: str) -> int:
+    """Parse a bare integer or IAU-format alert ID to an integer.
+
+    Parameters
+    ----------
+    alert_id
+        Either a decimal integer ID or an ``LSST-AP-DS-{n}`` string.
+
+    Returns
+    -------
+    int
+        The (numeric) alert ID.
+
+    Raises
+    ------
+    ValueError
+        With a DALI-compliant message for malformed or non-LSST IDs.
+    """
+    if alert_id.startswith("LSST-"):
+        if not alert_id.startswith(IAU_ALERT_PREFIX):
+            raise ValueError(f"Non-LSST alert ID '{alert_id}'")
+        numeric = alert_id[len(IAU_ALERT_PREFIX) :]
+    else:
+        numeric = alert_id
+
     try:
-        yield
-    except AlertNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e)
-        ) from e
-    except SchemaNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e)
-        ) from e
+        return int(numeric)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)
-        ) from e
+        raise ValueError(f"Invalid alert ID format in '{alert_id}'") from e
+
+
+def _validate_responseformat(responseformat: str | None) -> Response | None:
+    """Return a 415 plain-text Response if the format is not expected.
+
+    Returns ``None`` when ``responseformat`` is acceptable.
+
+    Parameters
+    ----------
+    responseformat
+        The value of the ``RESPONSEFORMAT`` query parameter, or ``None`` if
+        not provided.
+
+    Returns
+    -------
+    Response | None
+        A 415 Response if the format is invalid, or ``None`` if it is valid
+        or not provided.
+    """
+    if responseformat is not None and responseformat not in _ACCEPTED_FORMATS:
+        accepted = ", ".join(sorted(_ACCEPTED_FORMATS))
+        return Response(
+            content=(
+                f"Invalid response format '{responseformat}';"
+                f" accepted formats are {accepted}"
+            ),
+            media_type="text/plain",
+            status_code=415,
+        )
+    return None
+
+
+def _fits_attachment(content: bytes, filename: str) -> Response:
+    """Return a FITS file as an attachment response.
+
+    Parameters
+    ----------
+    content
+        The content of the FITS file as bytes.
+    filename
+        The filename to suggest in the Content-Disposition header.
+
+    Returns
+    -------
+    Response
+        A Response object with the FITS content and appropriate headers.
+    """
+    return Response(
+        content=content,
+        media_type=_FITS_CONTENT_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _avro_attachment(content: bytes, alert_id: int) -> Response:
+    """Return an Avro OCF file as an attachment response.
+
+    Parameters
+    ----------
+    content
+        The content of the Avro OCF file as bytes.
+    alert_id
+        The alert ID, used to construct the filename in the Content-Disposition
+        header.
+
+    Returns
+    -------
+    Response
+        A Response object with the Avro OCF content and appropriate headers.
+    """
+    return Response(
+        content=content,
+        media_type=_AVRO_OCF_CONTENT_TYPE,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="alert-{alert_id}.avro"'
+            )
+        },
+    )
+
+
+@external_router.get(
+    "/links",
+    summary="DataLink links for an alert",
+    description=(
+        "Return a DataLink VOTable listing all available related data "
+        "products for the given alert ID."
+    ),
+)
+async def get_alert_links(
+    request: Request,
+    id: Annotated[str, Query(alias="ID", description="Alert ID.")],
+    user: Annotated[str, Depends(auth_dependency)],
+    context: Annotated[RequestContext, Depends(context_dependency)],
+) -> Response:
+    if error := _check_unknown_params(request, _ID_ONLY_PARAMS):
+        return error
+    try:
+        alert_id = _parse_alert_id(id)
+    except ValueError as e:
+        return Response(
+            content=str(e), media_type="text/plain", status_code=400
+        )
+    context.rebind_logger(user=user, alert_id=str(alert_id))
+    context.logger.info("DataLink links request")
+    service_base_url = (
+        str(request.url).partition("?")[0].removesuffix("/links")
+    )
+    return Response(
+        content=build_links_votable(alert_id, service_base_url),
+        media_type=_VOTABLE_CONTENT_TYPE,
+    )
 
 
 @external_router.get(
@@ -68,61 +221,118 @@ async def get_index(
 
 
 @external_router.get(
-    "/alerts/{alert_id}",
-    summary="Get alert packet",
+    "/cutouts",
+    summary="Get cutout images for an alert",
     description=(
-        "Retrieve an alert packet by its ID. "
-        "By default returns the deserialised record as JSON, with binary "
-        "fields (e.g. cutout image stamps) base64-encoded. "
-        "Send ``Accept: application/avro`` to receive an Avro OCF container "
-        "file with the schema embedded."
+        "Return the cutout postage stamp images for the given alert as a "
+        "FITS file. Includes the difference, science and template cutouts."
     ),
 )
-async def get_alert(
-    alert_id: int,
+async def get_alert_cutouts(
+    request: Request,
+    id: Annotated[str, Query(alias="ID", description="Alert ID.")],
     user: Annotated[str, Depends(auth_dependency)],
     context: Annotated[RequestContext, Depends(context_dependency)],
 ) -> Response:
+    if error := _check_unknown_params(request, _ID_ONLY_PARAMS):
+        return error
+    try:
+        alert_id = _parse_alert_id(id)
+    except ValueError as e:
+        return Response(
+            content=str(e), media_type="text/plain", status_code=400
+        )
     context.rebind_logger(user=user, alert_id=str(alert_id))
-    context.logger.info("Alert retrieval request")
+    context.logger.info("Alert cutouts request")
     alert_service = context.factory.create_alert_service()
-
-    accept = context.request.headers.get("accept", "application/json")
-    want_avro = _AVRO_CONTENT_TYPE in accept
-
-    with _handle_alert_errors():
-        if want_avro:
-            avro_bytes = await alert_service.get_alert_avro(alert_id)
-            return Response(content=avro_bytes, media_type=_AVRO_CONTENT_TYPE)
-        else:
-            alert = await alert_service.get_alert(alert_id)
-            content = jsonable_encoder(
-                alert,
-                custom_encoder={
-                    bytes: lambda b: base64.b64encode(b).decode(),
-                    float: _none_if_nonfinite,
-                },
-            )
-            return JSONResponse(content=content)
+    return _fits_attachment(
+        await alert_service.get_alert_cutouts(alert_id),
+        f"cutouts-{alert_id}.fits",
+    )
 
 
 @external_router.get(
-    "/alerts/{alert_id}/schema",
+    "/schema",
     summary="Get Avro schema for an alert",
     description=(
         "Return the Avro schema used to serialise the given alert. The schema"
         " is identified by the schema ID embedded in the alert's Confluent"
         " wire format header."
     ),
-    response_class=JSONResponse,
 )
 async def get_alert_schema(
-    alert_id: int,
+    request: Request,
+    id: Annotated[str, Query(alias="ID", description="Alert ID.")],
     user: Annotated[str, Depends(auth_dependency)],
     context: Annotated[RequestContext, Depends(context_dependency)],
-) -> dict[str, Any]:
+) -> Response:
+    if error := _check_unknown_params(request, _ID_ONLY_PARAMS):
+        return error
+    try:
+        alert_id = _parse_alert_id(id)
+    except ValueError as e:
+        return Response(
+            content=str(e), media_type="text/plain", status_code=400
+        )
     context.rebind_logger(user=user, alert_id=str(alert_id))
     context.logger.info("Alert schema request")
     alert_service = context.factory.create_alert_service()
-    with _handle_alert_errors():
-        return await alert_service.get_alert_schema(alert_id)
+    return JSONResponse(content=await alert_service.get_alert_schema(alert_id))
+
+
+@external_router.get(
+    "",
+    summary="Get alert packet",
+    description=(
+        "Retrieve an alert packet by its ID. Accepts either an integer "
+        "alert ID or the IAU form ``LSST-AP-DS-{n}`` via the ``ID`` query "
+        "parameter. "
+        "By default returns an Avro OCF container file with the schema "
+        "embedded (``application/x-avro-ocf``). "
+        "Use ``RESPONSEFORMAT=fits`` or ``RESPONSEFORMAT=application/fits`` "
+        "to receive a multi-extension FITS file. "
+        "Use ``RESPONSEFORMAT=json`` or ``RESPONSEFORMAT=application/json`` "
+        "to receive the alert as JSON."
+    ),
+)
+async def get_alert(
+    request: Request,
+    id: Annotated[str, Query(alias="ID", description="Alert ID.")],
+    user: Annotated[str, Depends(auth_dependency)],
+    context: Annotated[RequestContext, Depends(context_dependency)],
+    responseformat: Annotated[
+        str | None,
+        Query(alias="RESPONSEFORMAT", description="Response format."),
+    ] = None,
+) -> Response:
+    if error := _check_unknown_params(request, _ALERT_PARAMS):
+        return error
+    try:
+        numeric_id = _parse_alert_id(alert_id=id)
+    except ValueError as e:
+        return Response(
+            content=str(e), media_type="text/plain", status_code=400
+        )
+    context.rebind_logger(user=user, alert_id=str(numeric_id))
+    context.logger.info("Alert retrieval request")
+
+    if error_response := _validate_responseformat(responseformat):
+        return error_response
+
+    alert_service = context.factory.create_alert_service()
+
+    if responseformat in _FITS_FORMATS:
+        return _fits_attachment(
+            await alert_service.get_alert_fits(numeric_id),
+            f"alert-{numeric_id}.fits",
+        )
+
+    if responseformat in _JSON_FORMATS:
+        return JSONResponse(
+            content=await alert_service.get_alert_json(numeric_id)
+        )
+
+    # Default to Avro OCF if no format specified.
+    return _avro_attachment(
+        await alert_service.get_alert_avro(numeric_id), numeric_id
+    )

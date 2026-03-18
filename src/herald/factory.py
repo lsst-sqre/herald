@@ -71,6 +71,16 @@ class Factory:
         self._process_context = process_context
         self._logger = logger
 
+    def set_logger(self, logger: BoundLogger) -> None:
+        """Update the logger, propagating new context to future services.
+
+        Parameters
+        ----------
+        logger
+            The rebound logger to use for subsequent service creation.
+        """
+        self._logger = logger
+
     def create_alert_service(self) -> AlertService:
         """Create an ``AlertService`` for the current request."""
         return AlertService(

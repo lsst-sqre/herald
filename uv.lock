@@ -528,11 +528,13 @@ name = "herald"
 source = { editable = "." }
 dependencies = [
     { name = "aiobotocore" },
+    { name = "astropy" },
     { name = "fastapi" },
     { name = "fastavro" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyvo" },
+    { name = "pyyaml" },
     { name = "safir" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -560,16 +562,19 @@ tox = [
 typing = [
     { name = "mypy" },
     { name = "types-aiobotocore-s3" },
+    { name = "types-pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "aiobotocore", specifier = ">=2.13.0" },
+    { name = "astropy", specifier = ">=6.0" },
     { name = "fastapi", specifier = ">=0.100" },
     { name = "fastavro", specifier = ">=1.9.0" },
     { name = "pydantic", specifier = ">2" },
     { name = "pydantic-settings", specifier = ">=2" },
     { name = "pyvo", specifier = ">=1.8.1" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "safir", specifier = ">=5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34" },
 ]
@@ -597,6 +602,7 @@ tox = [
 typing = [
     { name = "mypy", specifier = ">=1.15" },
     { name = "types-aiobotocore-s3" },
+    { name = "types-pyyaml" },
 ]
 
 [[package]]
@@ -1444,6 +1450,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/03/51/bbe7ebdf2c566ecf73ce432e2c2f7419d887a94f840f4c03a92fc0ff5a8e/types_aiobotocore_s3-3.2.0.tar.gz", hash = "sha256:23d03c3f468f47191eb74f0052d6c1ec6a9b49c1b5765fcd5a93b3c06d78e621", size = 76886, upload-time = "2026-02-25T02:31:29.001Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/11/8f/77133f7b8682ad35a79ac644602083f3a1a7a3bf6e2613a8eaad45c84663/types_aiobotocore_s3-3.2.0-py3-none-any.whl", hash = "sha256:07e6093b776e1c4e6801b02bea550a556ecc22f044219d60d57b72b4b2c8b74f", size = 84605, upload-time = "2026-02-25T02:31:27.925Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20250915"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7e/69/3c51b36d04da19b92f9e815be12753125bd8bc247ba0470a982e6979e71c/types_pyyaml-6.0.12.20250915.tar.gz", hash = "sha256:0f8b54a528c303f0e6f7165687dd33fafa81c807fcac23f632b63aa624ced1d3", size = 17522, upload-time = "2025-09-15T03:01:00.728Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/e0/1eed384f02555dde685fff1a1ac805c1c7dcb6dd019c916fe659b1c1f9ec/types_pyyaml-6.0.12.20250915-py3-none-any.whl", hash = "sha256:e7d4d9e064e89a3b3cae120b4990cd370874d2bf12fa5f46c97018dd5d3c9ab6", size = 20338, upload-time = "2025-09-15T03:00:59.218Z" },
 ]
 
 [[package]]

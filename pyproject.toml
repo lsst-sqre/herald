@@ -20,7 +20,9 @@ classifiers = [
 requires-python = ">=3.14"
 dependencies = [
     "aiobotocore>=2.13.0",
+    "astropy>=6.0",
     "fastavro>=1.9.0",
+    "pyyaml>=6.0",
     "fastapi>=0.100",
     "pydantic>2",
     "pydantic-settings>=2",
@@ -61,6 +63,7 @@ tox = [
 typing = [
     "mypy>=1.15",
     "types-aiobotocore-s3",
+    "types-PyYAML",
 ]
 
 [tool.coverage.run]
@@ -151,6 +154,6 @@ new_fragment_template = "file:changelog.d/_template.md.jinja"
 skip_fragments = "_template.md.jinja"
 
 [tool.setuptools.package-data]
-herald = ["py.typed"]
+herald = ["py.typed", "resources/*.yaml"]
 
 [tool.setuptools_scm]

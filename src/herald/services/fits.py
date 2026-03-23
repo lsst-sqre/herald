@@ -243,7 +243,7 @@ def _build_diasource_hdu(
     """Build the DIASOURCE BinTableHDU.
 
     Row 0 is the triggering diaSource and subsequent rows are prvDiaSources.
-    ``psfFlux`` is moved to immediately follow ``midPointMjdTai`` when both
+    ``psfFlux`` is moved to immediately follow ``midpointMjdTai`` when both
     columns are present, to facilitate default light-curve plots.
     Extra columns ``trigger`` and ``iau_id`` are appended.
 
@@ -268,11 +268,11 @@ def _build_diasource_hdu(
     columns = _records_to_columns(rows, dia_fields)
     col_names = [c.name for c in columns]
 
-    if "psfFlux" in col_names and "midPointMjdTai" in col_names:
+    if "psfFlux" in col_names and "midpointMjdTai" in col_names:
         psf_idx = col_names.index("psfFlux")
-        mjd_idx = col_names.index("midPointMjdTai")
+        mjd_idx = col_names.index("midpointMjdTai")
 
-        # We want psfFlux to be immediately after midPointMjdTai (Apparently
+        # We want psfFlux to be immediately after midpointMjdTai (Apparently
         # this is a common convention for light-curve tables
         # and some plotting tools) so we remove it from its current position
         # and re-insert it after midPointMjdTai. We need to adjust the

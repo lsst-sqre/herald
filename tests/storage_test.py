@@ -79,3 +79,19 @@ async def test_alert_not_found_when_both_keys_missing() -> None:
 
     with pytest.raises(AlertNotFoundError):
         await store.get_alert_bytes(1234567890)
+
+
+@pytest.mark.asyncio
+async def test_schema_cached_after_first_fetch() -> None:
+    schema_bytes = b'{"type": "record", "name": "Alert", "fields": []}'
+    body = MagicMock()
+    body.read = AsyncMock(return_value=schema_bytes)
+
+    s3 = MagicMock()
+    s3.get_object = AsyncMock(return_value={"Body": body})
+    store = AlertStore(s3_client=s3, config=config)
+    result1 = await store.get_schema_bytes(1)
+    result2 = await store.get_schema_bytes(1)
+
+    assert s3.get_object.call_count == 1
+    assert result1 == result2 == schema_bytes

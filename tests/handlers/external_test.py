@@ -502,6 +502,7 @@ async def test_get_alert_links(
     assert any("12345" in url and "schema" in url for url in access_urls)
     assert "#this" in semantics
     assert "#cutout" in semantics
+    assert "#detached-header" in semantics
 
 
 @pytest.mark.asyncio
@@ -557,3 +558,74 @@ async def test_get_alert_links_unknown_param(
     )
     assert response.status_code == 400
     assert "Invalid parameter 'foo' " in response.text
+
+
+@pytest.mark.asyncio
+async def test_get_alert_json_nan_becomes_null(
+    client_with_mock_store: AsyncClient, mock_store: MagicMock
+) -> None:
+    schema = {
+        "type": "record",
+        "name": "Alert",
+        "namespace": "lsst.v7",
+        "fields": [
+            {"name": "alertId", "type": "long"},
+            {"name": "psfLnL", "type": "float"},
+        ],
+    }
+    alert = {"alertId": 12345, "psfLnL": float("nan")}
+    mock_store.get_alert_bytes.return_value = _make_alert_bytes(alert, schema)
+    mock_store.get_schema_bytes.return_value = json.dumps(schema).encode()
+
+    response = await client_with_mock_store.get(
+        "/api/alerts?ID=12345&RESPONSEFORMAT=json"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["psfLnL"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_alert_corrupt_magic_byte(
+    client_with_mock_store: AsyncClient, mock_store: MagicMock
+) -> None:
+    corrupt_bytes = bytes([0x01, 0x00, 0x00, 0x00, 0x01]) + b"payload"
+    mock_store.get_alert_bytes.return_value = corrupt_bytes
+    response = await client_with_mock_store.get("/api/alerts?ID=12345")
+    assert response.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_get_alert_cutouts_not_found(
+    client_with_mock_store: AsyncClient, mock_store: MagicMock
+) -> None:
+    mock_store.get_alert_bytes.side_effect = AlertNotFoundError(12345)
+    response = await client_with_mock_store.get("/api/alerts/cutouts?ID=12345")
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+
+
+@pytest.mark.asyncio
+async def test_get_alert_fits_trigger_and_iau_id(
+    client_with_mock_store: AsyncClient, mock_store: MagicMock
+) -> None:
+    prv_source = {"diaSourceId": 99999, "ra": 1.0, "dec": 2.0}
+    alert = {**_FITS_ALERT, "prvDiaSources": [prv_source]}
+    mock_store.get_alert_bytes.return_value = _make_alert_bytes(
+        alert, _FITS_SCHEMA
+    )
+    mock_store.get_schema_bytes.return_value = json.dumps(
+        _FITS_SCHEMA
+    ).encode()
+
+    response = await client_with_mock_store.get(
+        "/api/alerts?ID=12345&RESPONSEFORMAT=fits"
+    )
+    assert response.status_code == 200
+
+    with fits.open(io.BytesIO(response.content)) as hdul:
+        data = hdul["DIASOURCE"].data
+        assert data["trigger"][0]
+        assert not data["trigger"][1]
+        assert data["iau_id"][0].strip() == "LSST-AP-DS-12345"
+        assert data["iau_id"][1].strip() == "LSST-AP-DS-99999"

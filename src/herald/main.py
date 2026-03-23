@@ -22,7 +22,11 @@ from safir.slack.webhook import SlackRouteErrorHandler
 
 from .config import config
 from .dependencies.requestcontext import context_dependency
-from .exceptions import AlertNotFoundError, SchemaNotFoundError
+from .exceptions import (
+    AlertNotFoundError,
+    CorruptAlertError,
+    SchemaNotFoundError,
+)
 from .handlers.external import external_router
 from .handlers.internal import internal_router
 
@@ -82,6 +86,11 @@ async def _schema_not_found(
     request: Request, exc: SchemaNotFoundError
 ) -> Response:
     return Response(content=str(exc), media_type="text/plain", status_code=404)
+
+
+@app.exception_handler(CorruptAlertError)
+async def _corrupt_alert(request: Request, exc: CorruptAlertError) -> Response:
+    return Response(content=str(exc), media_type="text/plain", status_code=500)
 
 
 if config.slack_webhook:

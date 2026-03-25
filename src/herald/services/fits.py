@@ -14,12 +14,29 @@ from ..constants import IAU_ALERT_PREFIX
 
 __all__ = ["alert_to_fits", "cutouts_to_fits"]
 
-# Map from alert record field name to FITS EXTNAME
+# Map from alert record field name to FITS EXTNAME for cutout image fields.
 _CUTOUT_FIELDS: dict[str, str] = {
     "cutoutDifference": "DIFFIM",
     "cutoutScience": "SCIENCE",
     "cutoutTemplate": "TEMPLATE",
 }
+
+# Canonical EXTNAME for known top-level record/array fields.
+# Fields not listed here that end up as top-level binary tables
+# use the uppercased field name as its EXTNAME
+_TABLE_HDU_NAMES: dict[str, str] = {
+    "prvDiaForcedSources": "FORCEDPHOT",
+    "diaObject": "DIAOBJECT",
+    "ssSource": "SSSOURCE",
+    "mpc_orbits": "MPCORBIT",
+}
+
+# Top-level fields that are handled specially and must be excluded from the
+# generic BinTableHDU loop. The diaSource and prvDiaSources fields are merged
+# into the DIASOURCE HDU and cutout fields become ImageHDUs.
+_SPECIAL_FIELDS: frozenset[str] = frozenset(
+    {"diaSource", "prvDiaSources", *_CUTOUT_FIELDS}
+)
 
 # Column units loaded from the bundled resource file.
 _COLUMN_UNITS: dict[str, str] = yaml.safe_load(
@@ -98,6 +115,24 @@ def _unwrap_fields(
     if isinstance(avro_type, str) and avro_type in named_types:
         return named_types[avro_type]
     return []
+
+
+def _is_array_type(avro_type: Any) -> bool:
+    """Return True if the type resolves (through a nullable union) to an array.
+
+    Parameters
+    ----------
+    avro_type
+        An Avro type.
+    """
+    if isinstance(avro_type, list):
+        for t in avro_type:
+            if t != "null":
+                return _is_array_type(t)
+        return False
+    if isinstance(avro_type, dict):
+        return avro_type.get("type") == "array"
+    return False
 
 
 def _make_fits_column(
@@ -395,9 +430,13 @@ def alert_to_fits(
 ) -> bytes:
     """Convert a deserialised alert record to a multi-extension FITS file.
 
-    Assembles a FITS file containing image HDUs for each cutout stamp and
-    BinTableHDUs for the alert, prior sources, forced photometry,
-    DIA object, solar-system source and MPC orbit data.
+    Assembles a FITS file containing image HDUs for each cutout stamp,
+    a one-row ALERT BinTableHDU for top-level scalar fields, and a
+    BinTableHDU for every top-level field whose Avro type resolves to a
+    record or array-of-records.  The DIASOURCE HDU is handled specially
+    (see ``_build_diasource_hdu``).  Known fields use the canonical
+    EXTNAMEs in ``_TABLE_HDU_NAMES`` and for unrecognized fields we use
+    the uppercased field name.
 
     Parameters
     ----------
@@ -446,28 +485,20 @@ def alert_to_fits(
                 )
 
     hdus.append(_build_diasource_hdu(record, _fields_for("diaSource")))
-    hdus.append(
-        _build_array_hdu(
-            record.get("prvDiaForcedSources"),
-            _fields_for("prvDiaForcedSources"),
-            "FORCEDPHOT",
-        )
-    )
-    hdus.append(
-        _build_optional_record_hdu(
-            record.get("diaObject"), _fields_for("diaObject"), "DIAOBJECT"
-        )
-    )
-    hdus.append(
-        _build_optional_record_hdu(
-            record.get("ssSource"), _fields_for("ssSource"), "SSSOURCE"
-        )
-    )
-    hdus.append(
-        _build_optional_record_hdu(
-            record.get("mpc_orbits"), _fields_for("mpc_orbits"), "MPCORBIT"
-        )
-    )
+
+    for field in top_fields:
+        fname = field["name"]
+        if fname in _SPECIAL_FIELDS:
+            continue
+        sub_fields = _unwrap_fields(field["type"], named_types)
+        if not sub_fields:
+            continue
+        extname = _TABLE_HDU_NAMES.get(fname, fname.upper())
+        data = record.get(fname)
+        if _is_array_type(field["type"]):
+            hdus.append(_build_array_hdu(data, sub_fields, extname))
+        else:
+            hdus.append(_build_optional_record_hdu(data, sub_fields, extname))
 
     buf = io.BytesIO()
     fits.HDUList(hdus).writeto(buf)

@@ -265,9 +265,9 @@ async def test_get_alert_fits_format(
         assert "ALERT" in extnames
         assert "DIASOURCE" in extnames
         assert "FORCEDPHOT" in extnames
-        assert "DIAOBJECT" in extnames
         assert "SSSOURCE" in extnames
-        assert "MPCORBIT" in extnames
+        assert "DIAOBJECT" not in extnames
+        assert "MPCORBIT" not in extnames
 
 
 @pytest.mark.asyncio

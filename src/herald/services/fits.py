@@ -26,16 +26,22 @@ _CUTOUT_FIELDS: dict[str, str] = {
 # use the uppercased field name as its EXTNAME
 _TABLE_HDU_NAMES: dict[str, str] = {
     "prvDiaForcedSources": "FORCEDPHOT",
-    "diaObject": "DIAOBJECT",
     "ssSource": "SSSOURCE",
-    "mpc_orbits": "MPCORBIT",
 }
 
+# Top-level record/array fields merged into the ALERT HDU as additional
+# columns rather than getting their own BinTableHDU.
+# We currently know that only one of these branches will show up for an alert
+# i.e. diaObject or ssObject + mpc_orbits.
+#
+# ssObject is a future field not yet present in v10_0, but will likely show up
+# in later schema versions.
+_ALERT_MERGED_FIELDS: tuple[str, ...] = ("diaObject", "ssObject", "mpc_orbits")
+
 # Top-level fields that are handled specially and must be excluded from the
-# generic BinTableHDU loop. The diaSource and prvDiaSources fields are merged
-# into the DIASOURCE HDU and cutout fields become ImageHDUs.
+# generic BinTableHDU loop.
 _SPECIAL_FIELDS: frozenset[str] = frozenset(
-    {"diaSource", "prvDiaSources", *_CUTOUT_FIELDS}
+    {"diaSource", "prvDiaSources", *_ALERT_MERGED_FIELDS, *_CUTOUT_FIELDS}
 )
 
 # Column units loaded from the bundled resource file.
@@ -310,8 +316,8 @@ def _build_diasource_hdu(
         # We want psfFlux to be immediately after midpointMjdTai (Apparently
         # this is a common convention for light-curve tables
         # and some plotting tools) so we remove it from its current position
-        # and re-insert it after midPointMjdTai. We need to adjust the
-        # insertion index if psfFlux was originally before midPointMjdTai.
+        # and re-insert it after midpointMjdTai. We need to adjust the
+        # insertion index if psfFlux was originally before midpointMjdTai.
 
         if psf_idx != mjd_idx + 1:
             psf_col = columns.pop(psf_idx)
@@ -388,11 +394,15 @@ def _build_array_hdu(
 def _build_alert_hdu(
     record: dict[str, Any],
     top_fields: list[dict[str, Any]],
+    named_types: dict[str, list[dict[str, Any]]],
 ) -> fits.BinTableHDU:
-    """Build a one-row BinTableHDU for top-level alert scalar fields.
+    """Build a one-row BinTableHDU for the ALERT extension.
 
-    Complex fields (records, arrays, bytes) are silently skipped; they are
-    represented by their own HDUs elsewhere in the file.
+    Contains the top-level scalar alert fields concatenated with columns
+    from whichever of ``diaObject``, ``ssObject``, and ``mpc_orbits`` are
+    present in the record.  Only one branch is expected per alert: diaObject
+    or ssObject + mpc_orbits. Absent optional records are excluded rather than
+    using null values for those fields.
 
     Parameters
     ----------
@@ -400,13 +410,34 @@ def _build_alert_hdu(
         The full alert record dict.
     top_fields
         List of field dicts from the top-level alert schema.
+    named_types
+        Mapping from record name to field list, as returned by
+        ``_collect_named_types``.
 
     Returns
     -------
     fits.BinTableHDU
-        A one-row BinTableHDU containing the scalar top-level fields.
+        A one-row BinTableHDU.
     """
     columns = _records_to_columns([record], top_fields)
+
+    for fname in _ALERT_MERGED_FIELDS:
+        avro_type = next(
+            (f["type"] for f in top_fields if f["name"] == fname), None
+        )
+        if avro_type is None:
+            continue  # field not present in this schema version
+        sub_fields = _unwrap_fields(avro_type, named_types)
+        if not sub_fields:
+            continue
+        data = record.get(fname)
+        if data is None:
+            continue
+        # All current merged fields are nullable records, so data is a dict.
+        # The list branch is being defensive for future array fields.
+        row = data[0] if isinstance(data, list) else data
+        columns.extend(_records_to_columns([row], sub_fields))
+
     return fits.BinTableHDU.from_columns(columns, name="ALERT")
 
 
@@ -470,7 +501,7 @@ def alert_to_fits(
         return _unwrap_fields(avro_type, named_types)
 
     hdus: list[fits.HDU] = [_make_primary_hdu()]
-    hdus.append(_build_alert_hdu(record, top_fields))
+    hdus.append(_build_alert_hdu(record, top_fields, named_types))
 
     for field, extname in _CUTOUT_FIELDS.items():
         data = record.get(field)

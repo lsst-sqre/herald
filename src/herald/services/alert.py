@@ -206,8 +206,7 @@ class AlertService:
         raw = await self._store.get_alert_bytes(alert_id)
         schema_id, _ = _parse_confluent_header(alert_id, raw)
         schema_bytes = await self._store.get_schema_bytes(schema_id)
-        schema: dict[str, Any] = json.loads(schema_bytes)
-        return schema
+        return json.loads(schema_bytes)
 
     async def get_alert_cutouts(self, alert_id: int) -> bytes:
         """Retrieve cutout stamp images for an alert as a FITS file.

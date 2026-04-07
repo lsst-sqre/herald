@@ -19,11 +19,16 @@ classifiers = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "aiobotocore>=2.13.0",
+    "astropy>=6.0",
+    "fastavro>=1.9.0",
+    "pyyaml>=6.0",
     "fastapi>=0.100",
     "pydantic>2",
     "pydantic-settings>=2",
     "safir>=5",
     "uvicorn[standard]>=0.34",
+    "pyvo>=1.8.1",
 ]
 dynamic = ["version"]
 
@@ -43,7 +48,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
-    "respx",
+    "pytest-mock",
     "scriv[toml]",
 ]
 lint = [
@@ -57,6 +62,8 @@ tox = [
 ]
 typing = [
     "mypy>=1.15",
+    "types-aiobotocore-s3",
+    "types-PyYAML",
 ]
 
 [tool.coverage.run]
@@ -113,6 +120,7 @@ warn_untyped_fields = true
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "strict"
+testpaths = ["tests"]
 # The python_files setting is not for test detection (pytest will pick up any
 # test files named *_test.py without this setting) but to enable special
 # assert processing in any non-test supporting files under tests.  We
@@ -144,5 +152,8 @@ format = "md"
 md_header_level = "2"
 new_fragment_template = "file:changelog.d/_template.md.jinja"
 skip_fragments = "_template.md.jinja"
+
+[tool.setuptools.package-data]
+herald = ["py.typed", "resources/*.yaml"]
 
 [tool.setuptools_scm]

@@ -1,7 +1,7 @@
 """Internal HTTP handlers that serve relative to the root path, ``/``.
 
-These handlers aren't externally visible since the app is available at a path,
-``/herald``. See `herald.handlers.external` for
+These handlers aren't externally visible since the app is available at a path
+prefix (e.g. ``/api/alerts``). See `herald.handlers.external` for
 the external endpoint handlers.
 
 These handlers should be used for monitoring, health checks, internal status,

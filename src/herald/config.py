@@ -3,6 +3,7 @@
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from safir.logging import LogLevel, Profile
+from safir.metrics import MetricsConfiguration, metrics_configuration_factory
 
 __all__ = ["Config", "config"]
 
@@ -74,6 +75,11 @@ class Config(BaseSettings):
 
     aws_secret_access_key: SecretStr | None = Field(
         None, title="AWS/S3 secret access key"
+    )
+
+    metrics: MetricsConfiguration = Field(
+        default_factory=metrics_configuration_factory,
+        title="Metrics configuration",
     )
 
     slack_webhook: SecretStr | None = Field(

@@ -11,6 +11,7 @@ from safir.slack.webhook import SlackRouteErrorHandler
 from ..config import config
 from ..constants import IAU_ALERT_PREFIX
 from ..dependencies import RequestContext, context_dependency
+from ..events import AlertRequestFailureEvent, AlertRequestSuccessEvent
 from ..models import Index
 from .datalink import build_links_votable
 
@@ -185,10 +186,20 @@ async def get_alert_links(
     context: Annotated[RequestContext, Depends(context_dependency)],
 ) -> Response:
     if error := _check_unknown_params(request, _ID_ONLY_PARAMS):
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user, endpoint="links", error_type="unknown_params"
+            )
+        )
         return error
     try:
         alert_id = _parse_alert_id(id)
     except ValueError as e:
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user, endpoint="links", error_type="invalid_alert_id"
+            )
+        )
         return Response(
             content=str(e), media_type="text/plain", status_code=400
         )
@@ -196,6 +207,11 @@ async def get_alert_links(
     context.logger.info("DataLink links request")
     service_base_url = (
         str(request.url).partition("?")[0].removesuffix("/links")
+    )
+    await context.factory.events.alert_success.publish(
+        AlertRequestSuccessEvent(
+            user=user, alert_id=alert_id, endpoint="links"
+        )
     )
     return Response(
         content=build_links_votable(alert_id, service_base_url),
@@ -235,20 +251,44 @@ async def get_alert_cutouts(
     context: Annotated[RequestContext, Depends(context_dependency)],
 ) -> Response:
     if error := _check_unknown_params(request, _ID_ONLY_PARAMS):
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user, endpoint="cutouts", error_type="unknown_params"
+            )
+        )
         return error
     try:
         alert_id = _parse_alert_id(id)
     except ValueError as e:
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user, endpoint="cutouts", error_type="invalid_alert_id"
+            )
+        )
         return Response(
             content=str(e), media_type="text/plain", status_code=400
         )
     context.rebind_logger(user=user, alert_id=str(alert_id))
     context.logger.info("Alert cutouts request")
     alert_service = context.factory.create_alert_service()
-    return _fits_attachment(
-        await alert_service.get_alert_cutouts(alert_id),
-        f"cutouts-{alert_id}.fits",
+    try:
+        content = await alert_service.get_alert_cutouts(alert_id)
+    except Exception as e:
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user,
+                alert_id=alert_id,
+                endpoint="cutouts",
+                error_type=type(e).__name__,
+            )
+        )
+        raise
+    await context.factory.events.alert_success.publish(
+        AlertRequestSuccessEvent(
+            user=user, alert_id=alert_id, endpoint="cutouts"
+        )
     )
+    return _fits_attachment(content, f"cutouts-{alert_id}.fits")
 
 
 @external_router.get(
@@ -267,17 +307,44 @@ async def get_alert_schema(
     context: Annotated[RequestContext, Depends(context_dependency)],
 ) -> Response:
     if error := _check_unknown_params(request, _ID_ONLY_PARAMS):
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user, endpoint="schema", error_type="unknown_params"
+            )
+        )
         return error
     try:
         alert_id = _parse_alert_id(id)
     except ValueError as e:
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user, endpoint="schema", error_type="invalid_alert_id"
+            )
+        )
         return Response(
             content=str(e), media_type="text/plain", status_code=400
         )
     context.rebind_logger(user=user, alert_id=str(alert_id))
     context.logger.info("Alert schema request")
     alert_service = context.factory.create_alert_service()
-    return JSONResponse(content=await alert_service.get_alert_schema(alert_id))
+    try:
+        schema = await alert_service.get_alert_schema(alert_id)
+    except Exception as e:
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user,
+                alert_id=alert_id,
+                endpoint="schema",
+                error_type=type(e).__name__,
+            )
+        )
+        raise
+    await context.factory.events.alert_success.publish(
+        AlertRequestSuccessEvent(
+            user=user, alert_id=alert_id, endpoint="schema"
+        )
+    )
+    return JSONResponse(content=schema)
 
 
 @external_router.get(
@@ -306,10 +373,20 @@ async def get_alert(
     ] = None,
 ) -> Response:
     if error := _check_unknown_params(request, _ALERT_PARAMS):
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user, endpoint="alert", error_type="unknown_params"
+            )
+        )
         return error
     try:
         numeric_id = _parse_alert_id(alert_id=id)
     except ValueError as e:
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user, endpoint="alert", error_type="invalid_alert_id"
+            )
+        )
         return Response(
             content=str(e), media_type="text/plain", status_code=400
         )
@@ -317,22 +394,52 @@ async def get_alert(
     context.logger.info("Alert retrieval request")
 
     if error_response := _validate_responseformat(responseformat):
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user,
+                alert_id=numeric_id,
+                endpoint="alert",
+                error_type="unsupported_format",
+            )
+        )
         return error_response
 
     alert_service = context.factory.create_alert_service()
 
-    if responseformat in _FITS_FORMATS:
-        return _fits_attachment(
-            await alert_service.get_alert_fits(numeric_id),
-            f"alert-{numeric_id}.fits",
-        )
+    try:
+        if responseformat in _FITS_FORMATS:
+            content = await alert_service.get_alert_fits(numeric_id)
+            await context.factory.events.alert_success.publish(
+                AlertRequestSuccessEvent(
+                    user=user, alert_id=numeric_id, endpoint="alert"
+                )
+            )
+            return _fits_attachment(content, f"alert-{numeric_id}.fits")
 
-    if responseformat in _JSON_FORMATS:
-        return JSONResponse(
-            content=await alert_service.get_alert_json(numeric_id)
-        )
+        if responseformat in _JSON_FORMATS:
+            content_json = await alert_service.get_alert_json(numeric_id)
+            await context.factory.events.alert_success.publish(
+                AlertRequestSuccessEvent(
+                    user=user, alert_id=numeric_id, endpoint="alert"
+                )
+            )
+            return JSONResponse(content=content_json)
 
-    # Default to Avro OCF if no format specified.
-    return _avro_attachment(
-        await alert_service.get_alert_avro(numeric_id), numeric_id
-    )
+        # Default to Avro OCF if no format specified.
+        content_avro = await alert_service.get_alert_avro(numeric_id)
+        await context.factory.events.alert_success.publish(
+            AlertRequestSuccessEvent(
+                user=user, alert_id=numeric_id, endpoint="alert"
+            )
+        )
+        return _avro_attachment(content_avro, numeric_id)
+    except Exception as e:
+        await context.factory.events.alert_failure.publish(
+            AlertRequestFailureEvent(
+                user=user,
+                alert_id=numeric_id,
+                endpoint="alert",
+                error_type=type(e).__name__,
+            )
+        )
+        raise

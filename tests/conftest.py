@@ -5,6 +5,8 @@ import os
 
 os.environ.setdefault("HERALD_S3_ALERTS_BUCKET", "test-alerts-bucket")
 os.environ.setdefault("HERALD_S3_SCHEMAS_BUCKET", "test-schemas-bucket")
+os.environ.setdefault("METRICS_APPLICATION", "herald")
+os.environ.setdefault("METRICS_ENABLED", "false")
 
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock
@@ -65,6 +67,8 @@ async def client_with_mock_store(
             store=mock_store,
             logger=MagicMock(spec=BoundLogger),
         )
+        mock_factory.events.alert_success.publish = AsyncMock()
+        mock_factory.events.alert_failure.publish = AsyncMock()
         return RequestContext(
             request=request,
             logger=MagicMock(spec=BoundLogger),

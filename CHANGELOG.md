@@ -7,6 +7,12 @@ Find changes for the upcoming release in the project's [changelog.d directory](h
 
 <!-- scriv-insert-here -->
 
+## 0.2.0 (2026-04-22)
+
+### Other changes
+
+- Add event reporting for successes and failures to all endpoints
+
 ## 0.1.0 (2026-04-07)
 
 ### New features

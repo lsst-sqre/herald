@@ -17,7 +17,15 @@ class AlertRequestSuccessEvent(EventPayload):
     endpoint: str = Field(
         ..., title="Endpoint name (alert, cutouts, schema, links)"
     )
-    duration_ms: float = Field(..., title="Request duration in milliseconds")
+    fetch_duration_ms: float = Field(
+        ..., title="Time spent fetching data in milliseconds"
+    )
+    processing_duration_ms: float = Field(
+        ..., title="Time spent processing the result in milliseconds"
+    )
+    total_duration_ms: float = Field(
+        ..., title="Total request duration in milliseconds"
+    )
 
 
 class AlertRequestFailureEvent(EventPayload):
@@ -29,7 +37,15 @@ class AlertRequestFailureEvent(EventPayload):
         ..., title="Endpoint name (alert, cutouts, schema, links)"
     )
     error_type: str = Field(..., title="Error type or exception class name")
-    duration_ms: float = Field(..., title="Request duration in milliseconds")
+    fetch_duration_ms: float = Field(
+        ..., title="Time spent fetching data in milliseconds"
+    )
+    processing_duration_ms: float = Field(
+        ..., title="Time spent processing the result in milliseconds"
+    )
+    total_duration_ms: float = Field(
+        ..., title="Total request duration in milliseconds"
+    )
 
 
 class Events(EventMaker):

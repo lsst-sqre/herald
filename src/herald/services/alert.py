@@ -8,6 +8,7 @@ import io
 import json
 import math
 import struct
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,6 +38,12 @@ class _ParsedAlert:
 
     record: dict[str, Any]
     """Deserialised alert record."""
+
+    fetch_duration_ms: float
+    """Time spent waiting for S3 responses in milliseconds."""
+
+    processing_duration_ms: float
+    """Time spent on CPU processing (deserialization etc.) in milliseconds."""
 
 
 def _sanitize_for_json(obj: Any) -> Any:
@@ -123,6 +130,10 @@ class AlertService:
     def __init__(self, *, store: AlertStore, logger: BoundLogger) -> None:
         self._store = store
         self._logger = logger
+        self.fetch_duration_ms: float = 0.0
+        self.processing_duration_ms: float = 0.0
+        self.total_duration_ms: float = 0.0
+        self._request_start = time.monotonic()
 
     async def get_alert_avro(self, alert_id: int) -> bytes:
         """Retrieve an alert packet as an Avro OCF container file.
@@ -156,7 +167,13 @@ class AlertService:
             fastavro.writer(buf, fetched.parsed_schema, [fetched.record])
             return buf.getvalue()
 
-        return await asyncio.to_thread(_write)
+        proc_start = time.monotonic()
+        result = await asyncio.to_thread(_write)
+        self.processing_duration_ms += (time.monotonic() - proc_start) * 1000
+        self.total_duration_ms = (
+            time.monotonic() - self._request_start
+        ) * 1000
+        return result
 
     async def get_alert_json(self, alert_id: int) -> dict[str, Any]:
         """Retrieve an alert packet as a JSON-serialisable dict.
@@ -183,7 +200,13 @@ class AlertService:
             byte.
         """
         fetched = await self._fetch_record(alert_id)
-        return _sanitize_for_json(fetched.record)
+        proc_start = time.monotonic()
+        result = _sanitize_for_json(fetched.record)
+        self.processing_duration_ms += (time.monotonic() - proc_start) * 1000
+        self.total_duration_ms = (
+            time.monotonic() - self._request_start
+        ) * 1000
+        return result
 
     async def get_alert_schema(self, alert_id: int) -> dict[str, Any]:
         """Return the Avro schema for a given alert.
@@ -203,10 +226,27 @@ class AlertService:
         AlertNotFoundError
             If the alert does not exist in the archive.
         """
+        s3_start = time.monotonic()
         raw = await self._store.get_alert_bytes(alert_id)
+        s3_alert_done = time.monotonic()
+
         schema_id, _ = _parse_confluent_header(alert_id, raw)
+
+        s3_schema_start = time.monotonic()
         schema_bytes = await self._store.get_schema_bytes(schema_id)
-        return json.loads(schema_bytes)
+        s3_schema_done = time.monotonic()
+
+        self.fetch_duration_ms = (
+            (s3_alert_done - s3_start) + (s3_schema_done - s3_schema_start)
+        ) * 1000
+
+        proc_start = time.monotonic()
+        result = json.loads(schema_bytes)
+        self.processing_duration_ms = (time.monotonic() - proc_start) * 1000
+        self.total_duration_ms = (
+            time.monotonic() - self._request_start
+        ) * 1000
+        return result
 
     async def get_alert_cutouts(self, alert_id: int) -> bytes:
         """Retrieve cutout stamp images for an alert as a FITS file.
@@ -234,7 +274,12 @@ class AlertService:
             header is malformed.
         """
         fetched = await self._fetch_record(alert_id)
+        proc_start = time.monotonic()
         result = await asyncio.to_thread(cutouts_to_fits, fetched.record)
+        self.processing_duration_ms += (time.monotonic() - proc_start) * 1000
+        self.total_duration_ms = (
+            time.monotonic() - self._request_start
+        ) * 1000
         self._logger.debug("Assembled cutout FITS", alert_id=alert_id)
         return result
 
@@ -263,9 +308,14 @@ class AlertService:
             If the Confluent header is malformed.
         """
         fetched = await self._fetch_record(alert_id)
+        proc_start = time.monotonic()
         result = await asyncio.to_thread(
             alert_to_fits, fetched.schema_dict, fetched.record
         )
+        self.processing_duration_ms += (time.monotonic() - proc_start) * 1000
+        self.total_duration_ms = (
+            time.monotonic() - self._request_start
+        ) * 1000
         self._logger.debug("Assembled full FITS", alert_id=alert_id)
         return result
 
@@ -290,14 +340,28 @@ class AlertService:
             If the stored bytes do not start with the expected Confluent magic
             byte.
         """
+        s3_start = time.monotonic()
         raw = await self._store.get_alert_bytes(alert_id)
+        s3_alert_done = time.monotonic()
+
         schema_id, avro_payload = _parse_confluent_header(alert_id, raw)
+
+        s3_schema_start = time.monotonic()
         schema_bytes = await self._store.get_schema_bytes(schema_id)
+        s3_schema_done = time.monotonic()
+
+        self.fetch_duration_ms = (
+            (s3_alert_done - s3_start) + (s3_schema_done - s3_schema_start)
+        ) * 1000
+
+        proc_start = time.monotonic()
         schema_dict: dict[str, Any] = json.loads(schema_bytes)
         parsed_schema = fastavro.parse_schema(json.loads(schema_bytes))
         record: dict[str, Any] = fastavro.schemaless_reader(  # type: ignore[assignment]
             io.BytesIO(avro_payload), parsed_schema, parsed_schema
         )
+        self.processing_duration_ms = (time.monotonic() - proc_start) * 1000
+
         self._logger.debug(
             "Deserialised alert", alert_id=alert_id, schema_id=schema_id
         )
@@ -305,4 +369,6 @@ class AlertService:
             schema_dict=schema_dict,
             parsed_schema=parsed_schema,
             record=record,
+            fetch_duration_ms=self.fetch_duration_ms,
+            processing_duration_ms=self.processing_duration_ms,
         )

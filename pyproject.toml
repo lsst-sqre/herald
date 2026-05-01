@@ -28,6 +28,7 @@ dependencies = [
     "pydantic-settings>=2",
     "safir[kafka]>=7",
     "uvicorn[standard]>=0.34",
+    "pyinstrument>=4.0",
     "pyvo>=1.8.1",
 ]
 dynamic = ["version"]

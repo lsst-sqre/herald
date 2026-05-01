@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import cProfile
 import io
 import json
 import math
+import pstats
 import struct
 import time
 from dataclasses import dataclass
@@ -318,6 +320,22 @@ class AlertService:
         ) * 1000
         self._logger.debug("Assembled full FITS", alert_id=alert_id)
         return result
+
+    async def profile_fits_conversion(
+        self, alert_id: int, sort: str = "cumulative"
+    ) -> str:
+        """Fetch an alert and profile its FITS conversion with cProfile.
+
+        Returns cProfile stats as a plain-text string, sorted by ``sort``.
+        """
+        fetched = await self._fetch_record(alert_id)
+        pr = cProfile.Profile()
+        pr.enable()
+        alert_to_fits(fetched.schema_dict, fetched.record)
+        pr.disable()
+        buf = io.StringIO()
+        pstats.Stats(pr, stream=buf).sort_stats(sort).print_stats(40)
+        return buf.getvalue()
 
     async def _fetch_record(self, alert_id: int) -> _ParsedAlert:
         """Fetch an alert from S3 and deserialise it.

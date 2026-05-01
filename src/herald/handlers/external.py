@@ -1,5 +1,6 @@
 """Handlers for the app's external root, ``/herald/``."""
 
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -185,10 +186,14 @@ async def get_alert_links(
     user: Annotated[str, Depends(auth_dependency)],
     context: Annotated[RequestContext, Depends(context_dependency)],
 ) -> Response:
+    start = time.monotonic()
     if error := _check_unknown_params(request, _ID_ONLY_PARAMS):
         await context.factory.events.alert_failure.publish(
             AlertRequestFailureEvent(
-                user=user, endpoint="links", error_type="unknown_params"
+                user=user,
+                endpoint="links",
+                error_type="unknown_params",
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         return error
@@ -197,7 +202,10 @@ async def get_alert_links(
     except ValueError as e:
         await context.factory.events.alert_failure.publish(
             AlertRequestFailureEvent(
-                user=user, endpoint="links", error_type="invalid_alert_id"
+                user=user,
+                endpoint="links",
+                error_type="invalid_alert_id",
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         return Response(
@@ -210,7 +218,10 @@ async def get_alert_links(
     )
     await context.factory.events.alert_success.publish(
         AlertRequestSuccessEvent(
-            user=user, alert_id=alert_id, endpoint="links"
+            user=user,
+            alert_id=alert_id,
+            endpoint="links",
+            duration_ms=(time.monotonic() - start) * 1000,
         )
     )
     return Response(
@@ -250,10 +261,14 @@ async def get_alert_cutouts(
     user: Annotated[str, Depends(auth_dependency)],
     context: Annotated[RequestContext, Depends(context_dependency)],
 ) -> Response:
+    start = time.monotonic()
     if error := _check_unknown_params(request, _ID_ONLY_PARAMS):
         await context.factory.events.alert_failure.publish(
             AlertRequestFailureEvent(
-                user=user, endpoint="cutouts", error_type="unknown_params"
+                user=user,
+                endpoint="cutouts",
+                error_type="unknown_params",
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         return error
@@ -262,7 +277,10 @@ async def get_alert_cutouts(
     except ValueError as e:
         await context.factory.events.alert_failure.publish(
             AlertRequestFailureEvent(
-                user=user, endpoint="cutouts", error_type="invalid_alert_id"
+                user=user,
+                endpoint="cutouts",
+                error_type="invalid_alert_id",
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         return Response(
@@ -280,12 +298,16 @@ async def get_alert_cutouts(
                 alert_id=alert_id,
                 endpoint="cutouts",
                 error_type=type(e).__name__,
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         raise
     await context.factory.events.alert_success.publish(
         AlertRequestSuccessEvent(
-            user=user, alert_id=alert_id, endpoint="cutouts"
+            user=user,
+            alert_id=alert_id,
+            endpoint="cutouts",
+            duration_ms=(time.monotonic() - start) * 1000,
         )
     )
     return _fits_attachment(content, f"cutouts-{alert_id}.fits")
@@ -306,10 +328,14 @@ async def get_alert_schema(
     user: Annotated[str, Depends(auth_dependency)],
     context: Annotated[RequestContext, Depends(context_dependency)],
 ) -> Response:
+    start = time.monotonic()
     if error := _check_unknown_params(request, _ID_ONLY_PARAMS):
         await context.factory.events.alert_failure.publish(
             AlertRequestFailureEvent(
-                user=user, endpoint="schema", error_type="unknown_params"
+                user=user,
+                endpoint="schema",
+                error_type="unknown_params",
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         return error
@@ -318,7 +344,10 @@ async def get_alert_schema(
     except ValueError as e:
         await context.factory.events.alert_failure.publish(
             AlertRequestFailureEvent(
-                user=user, endpoint="schema", error_type="invalid_alert_id"
+                user=user,
+                endpoint="schema",
+                error_type="invalid_alert_id",
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         return Response(
@@ -336,12 +365,16 @@ async def get_alert_schema(
                 alert_id=alert_id,
                 endpoint="schema",
                 error_type=type(e).__name__,
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         raise
     await context.factory.events.alert_success.publish(
         AlertRequestSuccessEvent(
-            user=user, alert_id=alert_id, endpoint="schema"
+            user=user,
+            alert_id=alert_id,
+            endpoint="schema",
+            duration_ms=(time.monotonic() - start) * 1000,
         )
     )
     return JSONResponse(content=schema)
@@ -372,10 +405,14 @@ async def get_alert(
         Query(alias="RESPONSEFORMAT", description="Response format."),
     ] = None,
 ) -> Response:
+    start = time.monotonic()
     if error := _check_unknown_params(request, _ALERT_PARAMS):
         await context.factory.events.alert_failure.publish(
             AlertRequestFailureEvent(
-                user=user, endpoint="alert", error_type="unknown_params"
+                user=user,
+                endpoint="alert",
+                error_type="unknown_params",
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         return error
@@ -384,7 +421,10 @@ async def get_alert(
     except ValueError as e:
         await context.factory.events.alert_failure.publish(
             AlertRequestFailureEvent(
-                user=user, endpoint="alert", error_type="invalid_alert_id"
+                user=user,
+                endpoint="alert",
+                error_type="invalid_alert_id",
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         return Response(
@@ -400,6 +440,7 @@ async def get_alert(
                 alert_id=numeric_id,
                 endpoint="alert",
                 error_type="unsupported_format",
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         return error_response
@@ -411,7 +452,10 @@ async def get_alert(
             content = await alert_service.get_alert_fits(numeric_id)
             await context.factory.events.alert_success.publish(
                 AlertRequestSuccessEvent(
-                    user=user, alert_id=numeric_id, endpoint="alert"
+                    user=user,
+                    alert_id=numeric_id,
+                    endpoint="alert",
+                    duration_ms=(time.monotonic() - start) * 1000,
                 )
             )
             return _fits_attachment(content, f"alert-{numeric_id}.fits")
@@ -420,7 +464,10 @@ async def get_alert(
             content_json = await alert_service.get_alert_json(numeric_id)
             await context.factory.events.alert_success.publish(
                 AlertRequestSuccessEvent(
-                    user=user, alert_id=numeric_id, endpoint="alert"
+                    user=user,
+                    alert_id=numeric_id,
+                    endpoint="alert",
+                    duration_ms=(time.monotonic() - start) * 1000,
                 )
             )
             return JSONResponse(content=content_json)
@@ -429,7 +476,10 @@ async def get_alert(
         content_avro = await alert_service.get_alert_avro(numeric_id)
         await context.factory.events.alert_success.publish(
             AlertRequestSuccessEvent(
-                user=user, alert_id=numeric_id, endpoint="alert"
+                user=user,
+                alert_id=numeric_id,
+                endpoint="alert",
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         return _avro_attachment(content_avro, numeric_id)
@@ -440,6 +490,7 @@ async def get_alert(
                 alert_id=numeric_id,
                 endpoint="alert",
                 error_type=type(e).__name__,
+                duration_ms=(time.monotonic() - start) * 1000,
             )
         )
         raise

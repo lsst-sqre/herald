@@ -56,9 +56,9 @@ lint = [
     "pre-commit-uv",
     "ruff>=0.12",
 ]
-tox = [
-    "tox>=4.24",
-    "tox-uv>=1.25",
+nox = [
+    "nox",
+    "nox-uv",
 ]
 typing = [
     "mypy>=1.15",
@@ -72,7 +72,7 @@ branch = true
 source = ["herald"]
 
 [tool.coverage.paths]
-source = ["src", ".tox/*/site-packages"]
+source = ["src", ".nox/*/lib/*/site-packages"]
 
 [tool.coverage.report]
 show_missing = true
